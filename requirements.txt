@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+mangum
+fuzzywuzzy
+pandas
+python-Levenshtein
