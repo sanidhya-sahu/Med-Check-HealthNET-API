@@ -1,9 +1,10 @@
 import pandas as pd
 from fuzzywuzzy import process
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 # from mangum import Mangum
 from fastapi.middleware.cors import CORSMiddleware
-
+from typing import Optional
+from hosp_sort import find_hospitals_near_coordinates, get_nearby_hospitals
 
 app = FastAPI()
 # handler = Mangum(app)
@@ -71,3 +72,49 @@ def lookup_medicine_info(query):
         "message": "No match found"
     }
 
+
+@app.get('/hospitals')
+def get_nearby_hospitals_route(
+        lat: float = Query(..., description="Latitude of the search location"),
+        lon: float = Query(..., description="Longitude of the search location"),
+        radius: Optional[float] = Query(10.0, description="Search radius in kilometers")
+):
+    """
+    Find hospitals near the specified coordinates within the given radius.
+    Returns results as JSON with hospital details and distances.
+    """
+    try:
+        csv_file_path = "./hospital_directory.csv"
+
+        # We're using find_hospitals_near_coordinates directly since it returns a JSON string
+        # which is what we want for the API response
+        result_json = find_hospitals_near_coordinates(
+            csv_file_path=csv_file_path,
+            target_lat=lat,
+            target_lon=lon,
+            radius=radius
+        )
+
+        # Since find_hospitals_near_coordinates returns a JSON string,
+        # we need to convert it back to a Python object for FastAPI to handle
+        import json
+        return json.loads(result_json)
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"An error occurred: {str(e)}"
+        }
+
+
+@app.get('/')
+def root():
+    """Root endpoint that provides API information"""
+    return {
+        "status": "success",
+        "message": "Healthcare API is running",
+        "endpoints": {
+            "/med": "Lookup medicine details by name",
+            "/hospitals": "Find hospitals near specified coordinates"
+        }
+    }
