@@ -6,7 +6,7 @@ from fastapi import FastAPI, Query, HTTPException
 # from mangum import Mangum
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
-
+from chatbot import get_med_details
 from hosp_sort import find_hospitals_near_coordinates, get_nearby_hospitals
 
 app = FastAPI()
@@ -19,61 +19,42 @@ app.add_middleware(
 
 
 @app.get('/med')
-def lookup_medicine_info(query):
-    data_path = "./Medicine_Details.csv"
+async def get_medicine_details(
+        query: str = Query(..., description="Medicine name to look up (e.g., Paracetamol)")
+):
+    """
+    Lookup medicine details by name.
+    Returns medicine name, composition, and AI analysis.
+
+    Example: /med?query=Paracetamol
+    """
     try:
-        data = pd.read_csv(data_path)
-    except FileNotFoundError:
-        return {
-            "error": f"Could not find the data file at {data_path}",
-            "status": "error"
-        }
+        # Call the get_med_details function with the query parameter
+        result = get_med_details(query)
 
-    # Define column names
-    df_name = "Medicine Name"
-    df_usage = "Uses"
-    df_compos = "Composition"
-    df_se = "Side_effects"
-
-    # Check if required columns exist
-    required_columns = [df_name, df_usage, df_compos, df_se]
-    for col in required_columns:
-        if col not in data.columns:
+        # If no result was found
+        if result is None:
             return {
-                "error": f"Missing required column: {col}",
-                "status": "error"
+                "status": "error",
+                "message": "Medicine details not found"
             }
 
-    medicine_list = data[df_name].dropna().tolist()
-
-    match = process.extractOne(query, medicine_list)
-
-    if match:
-        best_match, score = match
-
-        if score < 70:
-            return {
-                "status": "no_match",
-                "message": "No close enough match found",
-                "match_score": score
-            }
-
-        matching_index = data[data[df_name] == best_match].index[0]
-
+        # Return the medicine details with a success status
         return {
             "status": "success",
-            "medicine_name": best_match,
-            "match_score": score,
-            "uses": data.loc[matching_index, df_usage],
-            "composition": data.loc[matching_index, df_compos],
-            "side_effects": data.loc[matching_index, df_se]
+            "data": {
+                "medicine": result["med"],
+                "composition": result["composition"],
+                "analysis": result["analysis"]
+            }
         }
 
-    return {
-        "status": "no_match",
-        "message": "No match found"
-    }
-
+    except Exception as e:
+        # Return a proper error response if anything goes wrong
+        return {
+            "status": "error",
+            "message": f"An error occurred: {str(e)}"
+        }
 
 # Custom JSON encoder to handle non-compliant float values
 class SafeJSONEncoder(json.JSONEncoder):
@@ -114,7 +95,7 @@ async def get_nearby_hospitals_route(
     Example: /hospitals?lat=19.867141&lon=75.335294&radius=5
     """
     try:
-        csv_file_path = "./hospital_directory.csv"
+        csv_file_path = "./hospitals.csv"
 
         # Get the JSON string from the find_hospitals_near_coordinates function
         result_json = find_hospitals_near_coordinates(
