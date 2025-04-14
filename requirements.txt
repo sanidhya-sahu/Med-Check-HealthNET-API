@@ -4,3 +4,4 @@ mangum
 fuzzywuzzy
 pandas
 python-Levenshtein
+groq
