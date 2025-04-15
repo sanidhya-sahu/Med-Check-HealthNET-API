@@ -77,7 +77,7 @@ def sanitize_json_data(data):
 async def get_hospitals(
         lat: float = Query(..., description="Latitude of the search location"),
         lon: float = Query(..., description="Longitude of the search location"),
-        radius: Optional[float] = Query(5.0, description="Search radius in kilometers")
+        radius: Optional[float] = Query(25.0, description="Search radius in kilometers")
 ):
     try:
         result = get_nearest_hospitals_info(lat, lon, radius)
