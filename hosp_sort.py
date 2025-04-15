@@ -1,164 +1,83 @@
-# hospital_finder.py
-"""
-Module for finding hospitals near specified coordinates using the Haversine formula.
-"""
-
 import pandas as pd
-import math
-import os
-import json
+from math import radians, cos, sin, sqrt, atan2
+
+data = pd.read_csv('hospital_directory.csv', low_memory=False)
 
 
-def haversine_distance(lat1, lon1, lat2, lon2):
-    """
-    Calculate the great circle distance between two points
-    on the Earth (specified in decimal degrees)
+def parse_coordinates(coord_str):
+    if isinstance(coord_str, str):
+        coord_str = coord_str.strip()
+        if coord_str != 'Error' and coord_str:
+            try:
+                lat, lon = map(float, coord_str.split(","))
+                return lat, lon
+            except ValueError:
+                pass
+    return None, None
 
-    Parameters:
-    ----------
-    lat1, lon1 : float
-        Latitude and longitude of point 1 (in decimal degrees)
-    lat2, lon2 : float
-        Latitude and longitude of point 2 (in decimal degrees)
 
-    Returns:
-    -------
-    float
-        Distance between the points in kilometers
-    """
-    # Convert decimal degrees to radians
-    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+hospitals = []
+for _, row in data.iterrows():
+    lat, lon = parse_coordinates(row["Location_Coordinates"])
+    if lat is not None and lon is not None:
+        hospitals.append({
+            'Hospital_Name': row["Hospital_Name"],
+            'Latitude': lat,
+            'Longitude': lon,
+            'Location': row["Location"],
+            'State': row["State"],
+            'District': row["District"],
+            'Address': row["Address_Original_First_Line"],
+            'contact': row["Mobile_Number"]
+        })
 
-    # Haversine formula
-    dlon = lon2 - lon1
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    lat1 = radians(lat1)
+    lon1 = radians(lon1)
+    lat2 = radians(lat2)
+    lon2 = radians(lon2)
     dlat = lat2 - lat1
-    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    c = 2 * math.asin(math.sqrt(a))
-    r = 6371  # Radius of Earth in kilometers
-    return c * r
+    dlon = lon2 - lon1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return R * c
 
 
-def find_hospitals_near_coordinates(csv_file_path, target_lat, target_lon, radius=10):
-    """
-    Find hospitals within a given radius (in km) of the target coordinates
-    and return results as a JSON object
-
-    Parameters:
-    ----------
-    csv_file_path : str
-        Path to the CSV file containing hospital data
-    target_lat : float
-        Target latitude in decimal degrees
-    target_lon : float
-        Target longitude in decimal degrees
-    radius : float, optional
-        Search radius in kilometers (default is 10)
-
-    Returns:
-    -------
-    str
-        JSON string containing the search results
-    """
-    # Check if file exists
-    if not os.path.exists(csv_file_path):
-        return json.dumps({"error": f"File '{csv_file_path}' not found."})
-
-    # Read CSV file with low_memory=False to avoid DtypeWarning
-    try:
-        df = pd.read_csv(csv_file_path, low_memory=False)
-    except Exception as e:
-        return json.dumps({"error": f"Error reading CSV file: {e}"})
-
-    # Clean up Location_Coordinates column and extract latitude and longitude
-    hospitals_with_coords = []
-
-    for _, row in df.iterrows():
-        # Skip rows with missing coordinates
-        if pd.isna(row['Location_Coordinates']):
-            continue
-
-        try:
-            # Parse coordinates from string
-            coords = str(row['Location_Coordinates']).strip()
-            if coords:
-                # Split by comma and handle potential extra spaces
-                parts = [p.strip() for p in coords.split(',')]
-                if len(parts) == 2:
-                    lat, lon = map(float, parts)
-
-                    # Calculate distance from target
-                    distance = haversine_distance(target_lat, target_lon, lat, lon)
-
-                    # Add hospital info with distance if within radius
-                    if distance <= radius:
-                        hospitals_with_coords.append({
-                            'Hospital_Name': row['Hospital_Name'],
-                            'Address': row['Address_Original_First_Line'],
-                            'State': row['State'],
-                            'District': row['District'],
-                            'Pincode': row['Pincode'],
-                            'Phone': row['Telephone'],
-                            'Mobile': row['Mobile_Number'],
-                            'Distance_km': round(distance, 2)
-                        })
-        except Exception as e:
-            continue
-
-    # Sort by distance
-    hospitals_with_coords.sort(key=lambda x: x['Distance_km'])
-
-    # Create result JSON
-    result = {
-        "count": len(hospitals_with_coords),
-        "hospitals": hospitals_with_coords
-    }
-
-    # Return as formatted JSON string
-    return json.dumps(result, indent=2)
+def get_bounded_hospitals(user_lat, user_lon, hospitals, radius_km=25):
+    lat_diff = radius_km / 111.0
+    lon_diff = radius_km / (111.0 * cos(radians(user_lat)))
+    min_lat = user_lat - lat_diff
+    max_lat = user_lat + lat_diff
+    min_lon = user_lon - lon_diff
+    max_lon = user_lon + lon_diff
+    return [
+        hospital for hospital in hospitals
+        if min_lat <= hospital['Latitude'] <= max_lat and min_lon <= hospital['Longitude'] <= max_lon
+    ]
 
 
-def get_nearby_hospitals(csv_file_path, target_lat, target_lon, radius=10):
-    """
-    Find hospitals near coordinates but return Python dictionary instead of JSON string.
-    Useful when you want to work with the data directly in Python.
-
-    Parameters:
-    ----------
-    csv_file_path : str
-        Path to the CSV file containing hospital data
-    target_lat : float
-        Target latitude in decimal degrees
-    target_lon : float
-        Target longitude in decimal degrees
-    radius : float, optional
-        Search radius in kilometers (default is 10)
-
-    Returns:
-    -------
-    dict
-        Dictionary containing the search results
-    """
-    json_result = find_hospitals_near_coordinates(csv_file_path, target_lat, target_lon, radius)
-    return json.loads(json_result)
+def get_nearest_hospitals(user_lat, user_lon, hospitals, radius_km=25, top_n=5):
+    bounded_hospitals = get_bounded_hospitals(user_lat, user_lon, hospitals, radius_km)
+    hospital_distances = []
+    for hospital in bounded_hospitals:
+        dist = haversine(user_lat, user_lon, hospital['Latitude'], hospital['Longitude'])
+        hospital_distances.append((hospital, dist))
+    hospital_distances.sort(key=lambda x: x[1])
+    return hospital_distances[:top_n]
 
 
-# Example usage
-if __name__ == "__main__":
-    # Replace with your actual file path
-    csv_file_path = "hospital_directory.csv"
-
-    # # Example target coordinates
-    # target_lat = 19.867141
-    # target_lon = 75.335294
-    # search_radius = 15  # in kilometers
-    #
-    # # Find nearby hospitals and get JSON result
-    # result_json = find_hospitals_near_coordinates(
-    #     csv_file_path,
-    #     target_lat,
-    #     target_lon,
-    #     radius=search_radius
-    # )
-    #
-    # # Print the JSON result to console
-    # print(result_json)
+def get_nearest_hospitals_info(lat, lon, radius_km=25, top_n=5):
+    nearest = get_nearest_hospitals(lat, lon, hospitals, radius_km, top_n)
+    results = []
+    for hospital, dist in nearest:
+        mobile = hospital['contact']
+        mobile_display = "Not available" if not mobile or str(mobile).strip() in ['0', 'nan', 'NaN'] else str(mobile)
+        results.append({
+            "Hospital Name": hospital['Hospital_Name'],
+            "Location": hospital['Location'],
+            "Mobile Number": mobile_display,
+            "Distance (km)": round(dist, 2)
+        })
+    return results
